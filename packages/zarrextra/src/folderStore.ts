@@ -51,6 +51,11 @@ export class FolderStore implements zarr.AsyncReadable {
     return file && new Uint8Array(await file.arrayBuffer());
   }
 
+  /** Physical file keys, including non-Zarr files such as Parquet partitions. */
+  listKeys(): string[] {
+    return [...this.#files.keys()];
+  }
+
   async getRange(key: zarr.AbsolutePath, range: zarr.RangeQuery): Promise<Uint8Array | undefined> {
     const file = this.#files.get(key.slice(1));
     if (!file) {

@@ -18,19 +18,19 @@ export type ShapesGeometryRepresentationKind =
   | 'geoarrow-table';
 
 /**
- * Flat GeoArrow-style polygon geometry: interleaved exterior-ring coordinates plus
+ * Flat GeoArrow-style polygon geometry: interleaved coordinates of all rings plus
  * per-feature vertex offsets. This is the transferable representation the worker
  * produces and a binary deck.gl `PolygonLayer` consumes directly — no per-vertex
  * JS object. Preferred over {@link ShapesRenderData.polygons} when present.
  */
 export interface FlatPolygonGeometry {
-  /** Interleaved `[x0, y0, x1, y1, …]` exterior-ring coordinates for all features. */
+  /** Interleaved `[x0, y0, x1, y1, …]` coordinates of all rings for all features. */
   positions: Float32Array;
   /** Vertex offset where each feature begins; length `featureCount + 1`. */
   startIndices: Int32Array;
   /** Vertex-pulling render topology, tessellated off the main thread by the geometry
-   *  worker. Present on the worker path; absent on the main-thread decode path, where
-   *  the renderer tessellates lazily from `positions`/`startIndices`. */
+   *  worker. Required for multipart polygons and holes; omitted only for simple-ring
+   *  callers, where the renderer can tessellate from `positions`/`startIndices`. */
   tessellation?: TessellatedPolygons;
 }
 

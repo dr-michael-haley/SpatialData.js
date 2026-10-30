@@ -1173,7 +1173,12 @@ export default class SpatialDataPointsSource extends SpatialDataTableSource {
       // supports row-group range reads. Streams the axes — plus an authoritative
       // integer code column when the dataset has one, so those datasets stream
       // COLOURED rather than colour-later.
-      if (progressive && (await this.canLoadParquetRowGroups())) {
+      // Local dictionary-only partitions need the full-file decoder anyway for
+      // gene codes. Older PyArrow layouts also panic in the raw row-group decoder
+      // (inline column metadata means its contiguous byte-range assumption fails).
+      const localDictionary =
+        'listKeys' in this.storeRoot.store && featureKey && !featureCodeColumnName;
+      if (progressive && !localDictionary && (await this.canLoadParquetRowGroups())) {
         try {
           const streamed = yield* this.streamPointsGeometryByRowGroup(parquetPath, {
             axisNames,

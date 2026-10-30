@@ -1,4 +1,4 @@
-import type { Vector } from 'apache-arrow/vector';
+import { vectorFromArray, Binary, type Vector } from 'apache-arrow';
 import WKB from 'ol/format/WKB.js';
 import MultiPolygon from 'ol/geom/MultiPolygon.js';
 import Point from 'ol/geom/Point.js';
@@ -32,7 +32,7 @@ function toBytes(written: string | Uint8Array): Uint8Array {
 function wkbColumn(geometries: Array<Polygon | MultiPolygon | Point>): Vector {
   const wkb = new WKB();
   const buffers = geometries.map((g) => toBytes(wkb.writeGeometry(g)));
-  return { toArray: () => buffers } as unknown as Vector;
+  return vectorFromArray(buffers, new Binary());
 }
 
 describe('decodeWkbPolygonColumnFlat', () => {
@@ -76,7 +76,7 @@ describe('decodeWkbPolygonColumnFlat', () => {
     expect(result.positions[triangleVerts * 2 + 1]).toBe(10);
   });
 
-  it('takes the first sub-polygon exterior ring of a MultiPolygon', () => {
+  it('keeps every sub-polygon under the same feature identity', () => {
     // A MultiPolygon's coordinates nest one level deeper than a Polygon's:
     // [[ring, …holes], …subPolygons]. Returning the first sub-polygon's RINGS array
     // (rather than its exterior ring) fed arrays to `Number()` and emitted NaN.
@@ -103,10 +103,48 @@ describe('decodeWkbPolygonColumnFlat', () => {
     expect(result.featureCount).toBe(1);
     // Every coordinate is a real number — the NaN regression.
     expect(Array.from(result.positions).every(Number.isFinite)).toBe(true);
-    // Exactly the FIRST sub-polygon's exterior ring; later sub-polygons are dropped.
-    expect(Array.from(result.positions)).toEqual([0, 0, 2, 0, 1, 2, 0, 0]);
-    expect(Array.from(result.startIndices)).toEqual([0, 4]);
+    // Both disconnected pieces must be visible and pick as the same cell.
+    expect(Array.from(result.positions)).toEqual([
+      0, 0, 2, 0, 1, 2, 0, 0, 10, 10, 12, 10, 11, 12, 10, 10,
+    ]);
+    expect(Array.from(result.startIndices)).toEqual([0, 8]);
+    expect(result.tessellation?.triangleCount).toBe(2);
+    expect(result.tessellation?.featureScale[0]).toBeCloseTo(2);
+    expect(
+      Array.from(result.tessellation?.triangleData ?? [])
+        .filter((_, i) => i % 4 === 3)
+        .map((v) => v >>> 3)
+    ).toEqual([0, 0]);
   });
+});
+
+it('excludes holes from rendered and pickable triangles', () => {
+  const shape = new Polygon([
+    [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+      [0, 0],
+    ],
+    [
+      [2, 2],
+      [2, 8],
+      [8, 8],
+      [8, 2],
+      [2, 2],
+    ],
+  ]);
+  const result = decodeWkbPolygonColumnFlat(wkbColumn([shape]));
+  expect(result.tessellation?.featureScale[0]).toBeCloseTo(8); // sqrt(100 - 36)
+  const tess = result.tessellation;
+  if (!tess) throw new Error('Missing polygon topology');
+  for (let i = 0; i < tess.triangleCount; i++) {
+    const ids = Array.from(tess.triangleData.slice(i * 4, i * 4 + 3));
+    const x = ids.reduce((sum, id) => sum + tess.ringPositions[id * 2], 0) / 3;
+    const y = ids.reduce((sum, id) => sum + tess.ringPositions[id * 2 + 1], 0) / 3;
+    expect(x > 2 && x < 8 && y > 2 && y < 8).toBe(false);
+  }
 });
 
 describe('decodeWkbPointColumnFlat', () => {

@@ -125,6 +125,8 @@ export function tableToIndexColumnName(arrowTable: ArrowTable): string | undefin
     index_columns?: unknown[];
   };
   const indexColumns = pandasMetadataJson.index_columns;
+  // Points commonly use DataFrame.to_parquet(index=False).
+  if (Array.isArray(indexColumns) && indexColumns.length === 0) return undefined;
   if (!Array.isArray(indexColumns) || indexColumns.length !== 1) {
     throw new Error('Expected a single index column in the pandas metadata.');
   }
@@ -455,6 +457,8 @@ export default class SpatialDataTableSource extends AnnDataSource {
    * multipart element go straight to its first real part.
    */
   private async orderedParquetCandidatePaths(parquetPath: string): Promise<string[]> {
+    const listed = this.listedParquetParts(parquetPath);
+    if (listed.length) return [listed[0]];
     const pending = this.parquetDatasetMetadataCache.get(parquetPath);
     if (pending) {
       try {
@@ -470,6 +474,20 @@ export default class SpatialDataTableSource extends AnnDataSource {
       }
     }
     return getParquetCandidatePaths(parquetPath);
+  }
+
+  /** Local stores know their actual parts; numbering need not start at zero or be contiguous. */
+  private listedParquetParts(parquetPath: string): string[] {
+    const store = this.storeRoot.store;
+    if (!('listKeys' in store) || typeof store.listKeys !== 'function') return [];
+    const keys: unknown = store.listKeys();
+    if (!Array.isArray(keys)) return [];
+    const prefix = `${parquetPath.replace(/^\//, '')}/`;
+    return keys
+      .filter((key): key is string => typeof key === 'string')
+      .map((key) => key.replace(/^\//, ''))
+      .filter((key) => key.startsWith(prefix) && /^[^/]+\.parquet$/.test(key.slice(prefix.length)))
+      .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
   }
 
   /**
@@ -953,6 +971,12 @@ export default class SpatialDataTableSource extends AnnDataSource {
     const parts: ParquetPartMetadata[] = [];
     if (directPart) {
       parts.push(directPart);
+    } else if (this.listedParquetParts(parquetPath).length) {
+      for (const path of this.listedParquetParts(parquetPath)) {
+        const part = await this.probeParquetPartMetadata(path);
+        if (!part) throw new Error(`Cannot read listed Parquet part ${path}`);
+        parts.push(part);
+      }
     } else {
       for (let partIndex = 0; ; partIndex++) {
         const part = await this.probeParquetPartMetadata(
@@ -1465,6 +1489,8 @@ export default class SpatialDataTableSource extends AnnDataSource {
    * transient failure to read part 0.
    */
   private async discoverMultipartPartPaths(parquetPath: string): Promise<string[]> {
+    const listed = this.listedParquetParts(parquetPath);
+    if (listed.length) return listed;
     // Cached, so this is free once any caller has resolved the layout.
     const dataset = await this.loadParquetDatasetMetadata(parquetPath);
     if (dataset?.parts.length) {

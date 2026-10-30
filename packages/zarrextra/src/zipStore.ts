@@ -186,6 +186,10 @@ export class ZipStore implements zarr.AsyncReadable {
   /** Where each entry's data starts, read from its local header once. */
   readonly #dataOffsets = new Map<string, Promise<number>>();
 
+  listKeys(): string[] {
+    return [...this.#entries.keys()];
+  }
+
   private constructor(reader: ZipByteReader, entries: ReadonlyMap<string, ZipEntry>) {
     this.#reader = reader;
     this.#entries = entries;

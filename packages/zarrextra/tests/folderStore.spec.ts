@@ -19,6 +19,18 @@ async function openTree(store: FolderStore) {
 }
 
 describe('FolderStore', () => {
+  it('preserves physical Parquet paths through consolidation without recursive listing', async () => {
+    const files = v2Files();
+    files['points/transcripts/points.parquet/part.005.parquet'] = new Uint8Array([1, 2, 3]);
+    files['points/transcripts/points.parquet/part.019.parquet'] = new Uint8Array([4, 5, 6]);
+    const { zarritaStore } = await openTree(FolderStore.fromFiles(picked('store.zarr', files)));
+    expect(
+      'listKeys' in zarritaStore &&
+        typeof zarritaStore.listKeys === 'function' &&
+        zarritaStore.listKeys()
+    ).toContain('points/transcripts/points.parquet/part.019.parquet');
+    expect(await readValues(zarritaStore)).toEqual(VALUES);
+  });
   it('opens a picked .zarr folder without consolidated metadata by listing its files', async () => {
     const { tree, zarritaStore } = await openTree(
       FolderStore.fromFiles(picked('store.zarr', v2Files()))

@@ -141,20 +141,28 @@ async function resolveListableStore(source: StoreReference): Promise<zarr.Listab
     return store;
   }
 
+  const listKeys =
+    store instanceof FolderStore || store instanceof ZipStore
+      ? store.listKeys.bind(store)
+      : undefined;
+  const retainFileListing = (result: zarr.Listable<zarr.Readable>) =>
+    listKeys ? Object.assign(result, { listKeys }) : result;
   try {
-    return await zarr.withConsolidatedMetadata(store as zarr.AsyncReadable);
+    return retainFileListing(await zarr.withConsolidatedMetadata(store as zarr.AsyncReadable));
   } catch (defaultError) {
     try {
-      return await zarr.withConsolidatedMetadata(store as zarr.AsyncReadable, {
-        format: 'v2',
-        metadataKey: 'zmetadata',
-      });
+      return retainFileListing(
+        await zarr.withConsolidatedMetadata(store as zarr.AsyncReadable, {
+          format: 'v2',
+          metadataKey: 'zmetadata',
+        })
+      );
     } catch {
       // Consolidated metadata comes first even for stores that can list their
       // files: the tree walk below opens every listed node, one read each,
       // where consolidated metadata is a single read.
       if (store instanceof ZipStore || store instanceof FolderStore) {
-        return await store.withListing();
+        return retainFileListing(await store.withListing());
       }
       throw defaultError;
     }

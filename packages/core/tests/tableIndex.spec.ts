@@ -17,6 +17,9 @@ function tableWithPandasIndex(indexColumns: unknown[]) {
 }
 
 describe('tableToIndexColumnName', () => {
+  it('accepts an explicitly omitted pandas index', () => {
+    expect(tableToIndexColumnName(tableWithPandasIndex([]))).toBeUndefined();
+  });
   it('returns a string column name when the index is materialized', () => {
     expect(tableToIndexColumnName(tableWithPandasIndex(['cell_id']))).toBe('cell_id');
   });

@@ -467,15 +467,24 @@ export type PointsAttrs = z.infer<typeof pointsAttrsSchema>;
 /**
  * Schema for anndata table metadata
  */
-export const tableAttrsSchema = z.looseObject({
-  instance_key: z.string().optional().nullable(),
-  region: z
-    .union([z.string(), z.array(z.string())])
-    .optional()
-    .nullable(),
-  region_key: z.string().optional().nullable(),
-  'spatialdata-encoding-type': z.literal('ngff:regions_table'),
-});
+export const tableAttrsSchema = z
+  .looseObject({
+    'encoding-type': z.literal('anndata').optional(),
+    instance_key: z.string().optional().nullable(),
+    region: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .nullable(),
+    region_key: z.string().optional().nullable(),
+    // Older AnnData-backed SpatialData exports omit the redundant NGFF tag.
+    'spatialdata-encoding-type': z.literal('ngff:regions_table').optional(),
+  })
+  .refine(
+    (attrs) =>
+      attrs['encoding-type'] === 'anndata' ||
+      attrs['spatialdata-encoding-type'] === 'ngff:regions_table',
+    'Expected an AnnData or NGFF regions table'
+  );
 
 export type TableAttrs = z.infer<typeof tableAttrsSchema>;
 

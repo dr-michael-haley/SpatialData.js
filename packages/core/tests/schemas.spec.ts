@@ -327,6 +327,17 @@ describe('Schema Transformations', () => {
   });
 
   describe('tableAttrsSchema', () => {
+    it('accepts AnnData tables with explicit association keys and no NGFF tag', () => {
+      expect(
+        tableAttrsSchema.parse({
+          'encoding-type': 'anndata',
+          region: 'cells',
+          region_key: 'region',
+          instance_key: 'cell_id',
+        }).instance_key
+      ).toBe('cell_id');
+      expect(() => tableAttrsSchema.parse({ region: 'cells' })).toThrow();
+    });
     it('should validate table attrs', () => {
       const attrs = {
         instance_key: 'cell_id',

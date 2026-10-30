@@ -38,121 +38,88 @@ export interface TessellatedPolygons {
   triangleData: Uint32Array;
   triangleCount: number;
   ringVertexCount: number;
-  /** Per-feature characteristic size (√area, world units), one per ring/feature. The
+  /** Per-feature characteristic size (√area, world units), one per feature. The
    *  shader uses it to keep the outline from dominating when a shape is small on
-   *  screen. Length `ringCount`. */
+   *  screen. Length `featureCount`. */
   featureScale: Float32Array;
 }
 
-/** True if ring vertices `p` and `q` are adjacent in a ring of `n` (mod n). */
-function isBoundaryEdge(p: number, q: number, n: number): boolean {
-  const d = Math.abs(p - q);
-  return d === 1 || d === n - 1;
+/** Absolute vertex offsets for one polygon (exterior, holes, terminal offset). */
+export interface PolygonPart {
+  featureIndex: number;
+  ringOffsets: readonly number[];
 }
 
-/**
- * Tessellate flat polygon rings (interleaved positions + per-ring `startIndices`)
- * into shared ring positions + per-triangle topology. Non-polygon / degenerate rings
- * (< 3 distinct vertices) are skipped.
- */
+/** Tessellate polygons, preserving holes and a shared identity across disconnected parts. */
 export function tessellateFlatPolygons(
   positions: Float32Array,
-  startIndices: Int32Array
+  startIndices: Int32Array,
+  parts?: readonly PolygonPart[]
 ): TessellatedPolygons {
-  const ringCount = Math.max(0, startIndices.length - 1);
-
-  // Pass 1: per-ring unique length + earcut; count triangles and ring vertices.
+  const featureCount = Math.max(0, startIndices.length - 1);
+  const polygons =
+    parts ??
+    Array.from({ length: featureCount }, (_, featureIndex) => ({
+      featureIndex,
+      ringOffsets: [startIndices[featureIndex], startIndices[featureIndex + 1]],
+    }));
   let triangleCount = 0;
   let ringVertexCount = 0;
-  const ringTris: (number[] | Uint32Array)[] = new Array(ringCount);
-  const ringLen = new Int32Array(ringCount);
-  const ringVertStart = new Int32Array(ringCount);
-  for (let r = 0; r < ringCount; r += 1) {
-    const start = startIndices[r];
-    const end = startIndices[r + 1];
-    let n = end - start;
-    // Drop a closing duplicate vertex (WKB rings are closed: last == first).
-    if (n >= 2) {
-      const fx = positions[start * 2];
-      const fy = positions[start * 2 + 1];
-      const lx = positions[(end - 1) * 2];
-      const ly = positions[(end - 1) * 2 + 1];
-      if (fx === lx && fy === ly) {
-        n -= 1;
+  const decoded = polygons.map(({ featureIndex, ringOffsets }) => {
+    const coords: number[] = [],
+      holes: number[] = [],
+      next: number[] = [];
+    for (let r = 0; r + 1 < ringOffsets.length; r++) {
+      const start = ringOffsets[r];
+      let end = ringOffsets[r + 1];
+      if (
+        end - start >= 2 &&
+        positions[start * 2] === positions[(end - 1) * 2] &&
+        positions[start * 2 + 1] === positions[(end - 1) * 2 + 1]
+      )
+        end--;
+      if (end - start < 3) {
+        if (r === 0) break;
+        continue;
+      }
+      const base = coords.length / 2;
+      if (r > 0) holes.push(base);
+      for (let i = start; i < end; i++) {
+        coords.push(positions[i * 2], positions[i * 2 + 1]);
+        next.push(i + 1 === end ? base : base + i - start + 1);
       }
     }
-    ringVertStart[r] = ringVertexCount;
-    ringLen[r] = n;
-    if (n < 3) {
-      ringTris[r] = [];
-      continue;
-    }
-    ringVertexCount += n;
-    const coords = new Float64Array(n * 2);
-    for (let i = 0; i < n; i += 1) {
-      coords[i * 2] = positions[(start + i) * 2];
-      coords[i * 2 + 1] = positions[(start + i) * 2 + 1];
-    }
-    const tris = earcut(coords);
-    ringTris[r] = tris;
+    const tris = earcut(coords, holes);
+    const base = ringVertexCount;
+    ringVertexCount += coords.length / 2;
     triangleCount += tris.length / 3;
-  }
-
+    return { featureIndex, coords, tris, next, base };
+  });
   const ringPositions = new Float32Array(ringVertexCount * 2);
   const triangleData = new Uint32Array(triangleCount * 4);
-
-  // Fill the shared ring positions.
-  for (let r = 0; r < ringCount; r += 1) {
-    const n = ringLen[r];
-    if (n < 3) {
-      continue;
-    }
-    const start = startIndices[r];
-    const base = ringVertStart[r];
-    for (let i = 0; i < n; i += 1) {
-      ringPositions[(base + i) * 2] = positions[(start + i) * 2];
-      ringPositions[(base + i) * 2 + 1] = positions[(start + i) * 2 + 1];
-    }
-  }
-
-  // Fill the per-triangle topology and accumulate each feature's area.
-  const featureScale = new Float32Array(ringCount);
+  const areas = new Float64Array(featureCount);
   let t = 0;
-  for (let r = 0; r < ringCount; r += 1) {
-    const tris = ringTris[r];
-    if (!tris || tris.length === 0) {
-      continue;
-    }
-    const n = ringLen[r];
-    const base = ringVertStart[r];
-    const start = startIndices[r];
-    let area = 0;
+  for (const { featureIndex, coords, tris, next, base } of decoded) {
+    ringPositions.set(coords, base * 2);
+    const boundary = (a: number, b: number) => next[a] === b || next[b] === a;
     for (let k = 0; k < tris.length; k += 3) {
-      const ia = tris[k];
-      const ib = tris[k + 1];
-      const ic = tris[k + 2];
-      const bd0 = isBoundaryEdge(ib, ic, n) ? 1 : 0; // BC (opposite A)
-      const bd1 = isBoundaryEdge(ic, ia, n) ? 1 : 0; // CA (opposite B)
-      const bd2 = isBoundaryEdge(ia, ib, n) ? 1 : 0; // AB (opposite C)
-      const flags = bd0 | (bd1 << 1) | (bd2 << 2);
-      triangleData[t * 4] = base + ia;
-      triangleData[t * 4 + 1] = base + ib;
-      triangleData[t * 4 + 2] = base + ic;
-      // feature index is the ring index; pack it above the 3 flag bits.
-      triangleData[t * 4 + 3] = r * 8 + flags;
-      t += 1;
-
-      const ax = positions[(start + ia) * 2];
-      const ay = positions[(start + ia) * 2 + 1];
-      const bx = positions[(start + ib) * 2];
-      const by = positions[(start + ib) * 2 + 1];
-      const cx = positions[(start + ic) * 2];
-      const cy = positions[(start + ic) * 2 + 1];
-      area += Math.abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)) * 0.5;
+      const a = tris[k],
+        b = tris[k + 1],
+        c = tris[k + 2];
+      const flags =
+        Number(boundary(b, c)) | (Number(boundary(c, a)) << 1) | (Number(boundary(a, b)) << 2);
+      triangleData[t * 4] = base + a;
+      triangleData[t * 4 + 1] = base + b;
+      triangleData[t * 4 + 2] = base + c;
+      triangleData[t * 4 + 3] = featureIndex * 8 + flags;
+      t++;
+      areas[featureIndex] +=
+        Math.abs(
+          (coords[b * 2] - coords[a * 2]) * (coords[c * 2 + 1] - coords[a * 2 + 1]) -
+            (coords[b * 2 + 1] - coords[a * 2 + 1]) * (coords[c * 2] - coords[a * 2])
+        ) * 0.5;
     }
-    // √area ≈ the shape's characteristic side/diameter in world units.
-    featureScale[r] = Math.sqrt(area);
   }
-
+  const featureScale = Float32Array.from(areas, Math.sqrt);
   return { ringPositions, triangleData, triangleCount, ringVertexCount, featureScale };
 }

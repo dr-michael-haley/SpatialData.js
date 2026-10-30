@@ -42,6 +42,7 @@ import { NULLABLE_ENCODING_KINDS } from './nullableArrays';
 import SpatialDataPointsSource from './VPointsSource';
 import SpatialDataShapesSource from './VShapesSource';
 import SpatialDataTableSource from './VTableSource';
+import { readExpressionColumn } from './expression';
 
 /**
  * Parameters for creating element instances.
@@ -416,6 +417,23 @@ export class TableElement extends AbstractElement<'tables'> {
     return this.tableSource.loadObsColumns(
       columnNames.map((columnName) => `tables/${this.key}/obs/${columnName}`)
     ) as Promise<Array<TableColumnData | undefined>>;
+  }
+
+  async loadVarIndex(): Promise<string[]> {
+    return this.tableSource.loadVarIndex(`tables/${this.key}`);
+  }
+
+  async loadExpression(gene: string, signal?: AbortSignal): Promise<Float64Array> {
+    const names = await this.loadVarIndex();
+    const index = names.indexOf(gene);
+    if (index < 0) throw new Error(`Gene "${gene}" is not in table "${this.key}".`);
+    if (names.lastIndexOf(gene) !== index)
+      throw new Error(`Gene "${gene}" is ambiguous in table "${this.key}".`);
+    return readExpressionColumn(
+      this.tableSource.getStoreRoot(`tables/${this.key}/X`),
+      index,
+      signal
+    );
   }
 
   /**

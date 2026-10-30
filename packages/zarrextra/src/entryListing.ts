@@ -31,7 +31,7 @@ export function singleFolderPrefix(names: readonly string[]): string {
 export async function withEntryListing(
   store: zarr.AsyncReadable,
   names: readonly string[]
-): Promise<zarr.Listable<zarr.AsyncReadable>> {
+): Promise<zarr.Listable<zarr.AsyncReadable> & { listKeys(): string[] }> {
   const contents: ListedNode[] = [];
   for (const name of names) {
     const match = /^(?:(.*)\/)?(zarr\.json|\.zarray|\.zgroup)$/.exec(name);
@@ -54,5 +54,6 @@ export async function withEntryListing(
     get: store.get.bind(store),
     getRange: store.getRange?.bind(store),
     contents: () => contents,
+    listKeys: () => [...names],
   };
 }

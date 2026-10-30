@@ -620,7 +620,8 @@ async function handleDecodeShapesGeometry(
   if (geometry.kind === 'polygon') {
     // Tessellate here, off the main thread, so the render topology transfers back
     // ready to upload — no ~seconds-long main-thread tessellation on first paint.
-    const tessellation = tessellateFlatPolygons(geometry.positions, geometry.startIndices);
+    const tessellation =
+      geometry.tessellation ?? tessellateFlatPolygons(geometry.positions, geometry.startIndices);
     return {
       ok: true,
       result: {
