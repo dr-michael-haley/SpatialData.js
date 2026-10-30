@@ -29,8 +29,6 @@ function batchOf(pointCount: number): ColumnarNdarrayPointsBatch {
   };
 }
 
-type Deferred = { promise: Promise<ColumnarNdarrayPointsBatch>; resolve: () => void };
-
 function deferredLoader(batch: ColumnarNdarrayPointsBatch): {
   loader: PointsLoader;
   release: () => void;
@@ -73,11 +71,18 @@ function harness(initialLoader: PointsLoader) {
       state = next;
     },
   });
+  // Stand in for deck's GPU lifecycle; async loading/filtering below is real.
+  const subLayers: { isLoaded: boolean }[] = [];
+  Object.defineProperty(layer, 'internalState', {
+    value: { subLayers, isAsyncPropLoading: () => false },
+  });
+  layer.setNeedsUpdate = () => undefined;
   (layer as unknown as { setState(patch: Record<string, unknown>): void }).setState = (patch) => {
     state = { ...state, ...patch };
   };
   return {
     layer,
+    draw: () => subLayers.push({ isLoaded: true }),
     setProps(next: { loader?: PointsLoader; revision?: number }) {
       props = {
         resource: { loader: next.loader ?? (props.resource as { loader: PointsLoader }).loader },
@@ -134,5 +139,37 @@ describe('PointsLayer — out-of-order loadAll resolutions', () => {
     oldLoader.release();
     await stale;
     expect(h.preloadedPointCount()).toBe(99); // the old loader's batch never lands
+  });
+});
+
+describe('PointsLayer export readiness', () => {
+  it.each([0, 4])('waits for loading, filtering and drawing a %i-point batch', async (count) => {
+    const deferred = deferredLoader(batchOf(count));
+    const h = harness(deferred.loader);
+    const loading = h.layer.ensurePreloadedBatch();
+    expect(h.layer.isLoaded).toBe(false);
+    deferred.release();
+    await loading;
+    // A completed empty selection must also create a (zero-row) scatter layer.
+    expect(h.layer.isLoaded).toBe(false);
+    h.draw();
+    expect(h.layer.isLoaded).toBe(true);
+  });
+
+  it('does not capture the previous batch while a resource revision is loading', async () => {
+    const initial = deferredLoader(batchOf(2));
+    const h = harness(initial.loader);
+    initial.release();
+    await h.layer.ensurePreloadedBatch();
+    h.draw();
+    expect(h.layer.isLoaded).toBe(true);
+    const grown = deferredLoader(batchOf(8));
+    h.setProps({ loader: grown.loader, revision: 1 });
+    const refreshing = h.layer.refreshPreloadedBatch();
+    expect(h.layer.isLoaded).toBe(false);
+    grown.release();
+    await refreshing;
+    expect(h.preloadedPointCount()).toBe(8);
+    expect(h.layer.isLoaded).toBe(true);
   });
 });

@@ -57,9 +57,11 @@ export interface PointsLayerProps {
   use3d?: boolean;
 }
 
-interface PointsLayerState {
+interface PointsLayerState extends Record<string, unknown> {
   preloadedBatch?: ColumnarNdarrayPointsBatch;
+  preloadedRevision?: number;
   filteredBatch?: ColumnarNdarrayPointsBatch;
+  filteredSourceBatch?: ColumnarNdarrayPointsBatch;
   filteredBatchSignature?: string;
   filterGeneration?: number;
 }
@@ -114,6 +116,7 @@ async function filterPreloadedBatch(
 
 export class PointsLayer extends CompositeLayer<PointsLayerProps> {
   static layerName = 'PointsLayer';
+  declare state: PointsLayerState;
 
   static defaultProps = {
     visible: true,
@@ -123,6 +126,31 @@ export class PointsLayer extends CompositeLayer<PointsLayerProps> {
     pointRadiusMaxPixels: DEFAULT_POINT_RADIUS_MAX_PIXELS,
     showTileDebugOverlay: true,
   } satisfies Partial<PointsLayerProps>;
+
+  get isLoaded(): boolean {
+    if (this.props.resource.loader.capabilities.kind !== 'preloaded-columnar') {
+      return super.isLoaded;
+    }
+    // CompositeLayer considers an empty sublayer list loaded. Our loadAll and
+    // worker filter run outside deck's async-prop tracking, so figure capture must
+    // also wait for the current batch/filter and its scatter sublayer (even when
+    // the completed selection contains zero points).
+    const state = this.state;
+    return Boolean(
+      state?.preloadedBatch &&
+        state.preloadedRevision === this.props.resourceRevision &&
+        state.filteredSourceBatch === state.preloadedBatch &&
+        state.filteredBatch &&
+        state.filteredBatchSignature ===
+          filterBatchSignature(
+            this.props.featureCodes,
+            this.props.preloadedFeatureCodes,
+            this.props.renderCap
+          ) &&
+        this.getSubLayers().length > 0 &&
+        super.isLoaded
+    );
+  }
 
   initializeState(): void {
     this.state = { filterGeneration: 0 };
@@ -137,7 +165,9 @@ export class PointsLayer extends CompositeLayer<PointsLayerProps> {
     ) {
       this.setState({
         preloadedBatch: undefined,
+        preloadedRevision: undefined,
         filteredBatch: undefined,
+        filteredSourceBatch: undefined,
         filteredBatchSignature: undefined,
         filterGeneration: 0,
       });
@@ -162,7 +192,7 @@ export class PointsLayer extends CompositeLayer<PointsLayerProps> {
       props.preloadedFeatureCodes,
       props.renderCap
     );
-    const state = this.state as PointsLayerState;
+    const state = this.state;
     const preloadedBatch = state.preloadedBatch;
     const awaitingRowCodes = featureFilterAwaitingRowCodes(
       props.featureCodes,
@@ -210,7 +240,7 @@ export class PointsLayer extends CompositeLayer<PointsLayerProps> {
     if (resource.loader.capabilities.kind !== 'preloaded-columnar') {
       return;
     }
-    const existing = (this.state as PointsLayerState).preloadedBatch;
+    const existing = this.state.preloadedBatch;
     if (existing) {
       return;
     }
@@ -220,7 +250,7 @@ export class PointsLayer extends CompositeLayer<PointsLayerProps> {
       return;
     }
     if (batch?.format === 'columnar-ndarray') {
-      this.setState({ preloadedBatch: batch });
+      this.setState({ preloadedBatch: batch, preloadedRevision: token.revision });
       const awaitingRowCodes = featureFilterAwaitingRowCodes(
         this.props.featureCodes,
         this.props.preloadedFeatureCodes
@@ -259,7 +289,7 @@ export class PointsLayer extends CompositeLayer<PointsLayerProps> {
     if (batch?.format !== 'columnar-ndarray') {
       return;
     }
-    this.setState({ preloadedBatch: batch });
+    this.setState({ preloadedBatch: batch, preloadedRevision: token.revision });
     const awaitingRowCodes = featureFilterAwaitingRowCodes(
       this.props.featureCodes,
       this.props.preloadedFeatureCodes
@@ -280,17 +310,18 @@ export class PointsLayer extends CompositeLayer<PointsLayerProps> {
     batch: ColumnarNdarrayPointsBatch,
     signature: string
   ): Promise<void> {
-    const generation = ((this.state as PointsLayerState).filterGeneration ?? 0) + 1;
+    const generation = (this.state.filterGeneration ?? 0) + 1;
     this.setState({ filterGeneration: generation });
     const { featureCodes, preloadedFeatureCodes, renderCap } = this.props;
     let filtered = await filterPreloadedBatch(batch, featureCodes, preloadedFeatureCodes);
     filtered = applyRenderCapToColumnar(filtered, renderCap);
-    const state = this.state as PointsLayerState;
+    const state = this.state;
     if (state.filterGeneration !== generation) {
       return;
     }
     this.setState({
       filteredBatch: filtered,
+      filteredSourceBatch: batch,
       filteredBatchSignature: signature,
     });
     this.setNeedsUpdate();
