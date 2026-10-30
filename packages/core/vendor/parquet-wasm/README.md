@@ -15,3 +15,6 @@ Loaded by `packages/core/src/parquetWasmLoader.ts`.
 
 Upstream: [kylebarron/parquet-wasm](https://github.com/kylebarron/parquet-wasm)
 (MIT OR Apache-2.0).
+
+`LICENSE_MIT` is copied from upstream revision `2c23652` for redistribution of
+this vendored browser build.

@@ -77,6 +77,14 @@ const renderStack: RenderStack = {
 (MobX, zustand, React state, Leva, etc.) and the viewer re-renders. Keep
 structural identity in `entry.source`; use `entry.props` for renderer inputs.
 
+Host controls can be passed as `SpatialCanvasViewer` children. They render inside
+the image context and can call `useImageLayerContext(elementKey)` to read loaded
+channel names, slice sizes and display defaults. Use a React portal when those
+controls belong in a sidebar outside the viewport.
+
+Pass `onEntryStatusChange(layerId, status)` to display per-layer errors and
+notices in the host UI. An `undefined` status clears that layer's previous report.
+
 ## Hook-only composition (custom layout)
 
 When you already have a `DeckGL` shell or need to split loading from the viewport:

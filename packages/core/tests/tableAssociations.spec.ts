@@ -161,6 +161,53 @@ describe('SpatialData table associations', () => {
 });
 
 describe('loadAssociatedTableFeatureRows', () => {
+  it('keeps repeated instance ids in separate regions and preserves requested region columns', async () => {
+    const sdata = createMockSpatialData();
+    const table = sdata.tables!.multi_region_table;
+    sdata.getAssociatedTable = () => ['multi_region_table', table];
+    table.loadObsIndex = async () => ['2', '1', '1', '2'];
+    table.loadObsColumns = async () => [
+      ['cells', 'cells', 'nuclei', 'nuclei'],
+      ['A2', 'A1', 'B1', 'B2'],
+    ];
+    const cells = await loadAssociatedTableFeatureRows({
+      spatialData: sdata,
+      kind: 'labels',
+      key: 'cells',
+      extraColumnNames: ['region', 'cell_type'],
+    });
+    const nuclei = await loadAssociatedTableFeatureRows({
+      spatialData: sdata,
+      kind: 'labels',
+      key: 'nuclei',
+      extraColumnNames: ['cell_type'],
+    });
+    expect([...cells.rowIndexByFeatureId!]).toEqual([
+      ['2', 0],
+      ['1', 1],
+    ]);
+    expect([...nuclei.rowIndexByFeatureId!]).toEqual([
+      ['1', 2],
+      ['2', 3],
+    ]);
+    expect(cells.extraColumns?.[0]?.[1]).toBe('cells');
+    expect(cells.extraColumns?.[1]?.[1]).toBe('A1');
+  });
+
+  it('does not assign another region to labels with no matching table rows', async () => {
+    const sdata = createMockSpatialData();
+    const table = sdata.tables!.multi_region_table;
+    sdata.getAssociatedTable = () => ['multi_region_table', table];
+    table.loadObsIndex = async () => ['1', '2'];
+    table.loadObsColumns = async () => [['nuclei', 'nuclei']];
+    const rows = await loadAssociatedTableFeatureRows({
+      spatialData: sdata,
+      kind: 'labels',
+      key: 'cells',
+    });
+    expect(rows.rowIndexByFeatureId?.size).toBe(0);
+  });
+
   it('maps cell_circles features through a shared table tagged with region cells', async () => {
     const sdata = createMockSpatialData();
     const associated = sdata.getAssociatedTable('shapes', 'cell_circles');

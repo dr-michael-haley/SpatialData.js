@@ -363,7 +363,8 @@ describe('LabelsResolver — a table whose instance ids no label can carry', () 
             instanceKey: 'cell_id',
           }),
           loadObsIndex: async () => tableIds,
-          loadObsColumns: async (names: string[]) => names.map(() => tableIds.map(() => 'x')),
+          loadObsColumns: async (names: string[]) =>
+            names.map((name) => tableIds.map(() => (name === 'region' ? 'cell_labels' : 'x'))),
         },
       ],
     }) as unknown as SpatialData;

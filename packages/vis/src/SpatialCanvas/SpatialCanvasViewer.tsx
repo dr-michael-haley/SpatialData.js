@@ -98,6 +98,10 @@ export type SpatialFeaturePickEvent =
   | PointsSpatialFeaturePickEvent;
 
 export interface SpatialCanvasViewerProps {
+  /** Host controls rendered within the loaded-image context; may use portals into a sidebar. */
+  children?: ReactNode;
+  /** Report per-layer failures and notices to the embedding application's UI. */
+  onEntryStatusChange?: (layerId: string, status: EntryStatus | undefined) => void;
   spatialData?: SpatialData | null;
   coordinateSystem: string | null;
   renderStack?: RenderStack;
@@ -490,6 +494,8 @@ const overlayStyle: CSSProperties = {
 };
 
 function SpatialCanvasViewerInner({
+  children,
+  onEntryStatusChange,
   spatialData,
   coordinateSystem,
   renderStack,
@@ -566,6 +572,7 @@ function SpatialCanvasViewerInner({
     vivPassthrough,
     featureColorResolver,
     pickingEnabled,
+    onEntryStatusChange,
   });
   const hoverPickLayerIds = useMemo(
     () => Array.from(renderer.enabledLayerIds),
@@ -746,6 +753,7 @@ function SpatialCanvasViewerInner({
         )}
       </div>
       {tooltipPortal}
+      {children}
     </ImageLayerContextProvider>
   );
 }

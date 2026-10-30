@@ -43,9 +43,8 @@ export type OpenJphEncoder = (
   options?: Pick<Htj2kEncodeOptions, 'reversible' | 'quality'>
 ) => Promise<Uint8Array>;
 
-const dynamicImport = new Function('specifier', 'return import(specifier)') as (
-  specifier: string
-) => Promise<Record<string, unknown>>;
+const dynamicImport = (specifier: string): Promise<Record<string, unknown>> =>
+  import(/* @vite-ignore */ specifier);
 
 /** Create an HTJ2K encoder backed by the `openjph-wasm` `encode` function. */
 export function createOpenJphEncoder(

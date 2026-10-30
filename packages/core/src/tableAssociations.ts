@@ -79,17 +79,8 @@ function normalizeCellValue(value: TableColumnData | undefined, rowIndex: number
   return String(row);
 }
 
-function buildAcceptedRegionValues(
-  kind: SpatialAssociationKind,
-  key: string,
-  tableRegions: string[]
-): Set<string> {
-  const accepted = new Set<string>([key, `${kind}/${key}`]);
-  for (const regionName of tableRegions) {
-    accepted.add(regionName);
-    accepted.add(`${kind}/${regionName}`);
-  }
-  return accepted;
+function buildAcceptedRegionValues(kind: SpatialAssociationKind, key: string): Set<string> {
+  return new Set<string>([key, `${kind}/${key}`]);
 }
 
 function areZeroBasedSequentialFeatureIds(featureIds: readonly string[]): boolean {
@@ -232,7 +223,7 @@ export async function loadAssociatedTableFeatureRows({
 
   const [, table] = associated;
   const { region: tableRegions, regionKey } = table.getTableKeys();
-  const acceptedRegionValues = buildAcceptedRegionValues(kind, key, tableRegions);
+  const acceptedRegionValues = buildAcceptedRegionValues(kind, key);
   const seenExtra = new Set<string>();
   const uniqueExtra = extraColumnNames.filter((name) => {
     if (name === regionKey || seenExtra.has(name)) {
@@ -245,7 +236,8 @@ export async function loadAssociatedTableFeatureRows({
   const rowIds = await table.loadObsIndex();
   const columns = await table.loadObsColumns(requestedColumns);
   const regionColumn = columns[0];
-  const extraColumns = columns.slice(1);
+  // Preserve the caller's order, including a request for the region column.
+  const extraColumns = extraColumnNames.map((name) => columns[requestedColumns.indexOf(name)]);
   // Kinds come from consolidated metadata, already in memory — no I/O, and asked
   // for the extra columns directly so the result aligns with `extraColumns` by
   // construction rather than by matching lengths.
@@ -255,13 +247,15 @@ export async function loadAssociatedTableFeatureRows({
   // first is true. Consumers already handle an absent kind.
   const extraColumnKinds =
     typeof table.getObsColumnKinds === 'function'
-      ? table.getObsColumnKinds(uniqueExtra)
+      ? table.getObsColumnKinds(extraColumnNames)
       : undefined;
   const filteredRowIds: string[] = [];
   const rowIndexByFeatureId = new Map<string, number>();
+  const populatedRegions = new Set<string>();
 
   for (let rowIndex = 0; rowIndex < rowIds.length; rowIndex++) {
     const regionValue = normalizeCellValue(regionColumn, rowIndex);
+    populatedRegions.add(regionValue);
     if (regionValue && !acceptedRegionValues.has(regionValue)) {
       continue;
     }
@@ -270,9 +264,22 @@ export async function loadAssociatedTableFeatureRows({
     rowIndexByFeatureId.set(rowId, rowIndex);
   }
 
-  // Shared tables (e.g. Xenium cell_circles + cells) may tag every row with a
-  // sibling region such as "cells" while still annotating this shapes element.
-  if (rowIndexByFeatureId.size === 0 && rowIds.length > 0) {
+  // Shared shape representations (e.g. Xenium cell_circles + cells) can refer
+  // to one population stored under a sibling region. Keep that compatibility
+  // only for one declared, populated region with unique instance ids. Labels
+  // from separate ROIs routinely reuse ids and must always join by region.
+  const siblingRegion = populatedRegions.values().next().value;
+  if (
+    kind === 'shapes' &&
+    rowIndexByFeatureId.size === 0 &&
+    rowIds.length > 0 &&
+    populatedRegions.size === 1 &&
+    siblingRegion &&
+    tableRegions.some(
+      (region) => siblingRegion === region || siblingRegion === `${kind}/${region}`
+    ) &&
+    new Set(rowIds.map(String)).size === rowIds.length
+  ) {
     for (let rowIndex = 0; rowIndex < rowIds.length; rowIndex++) {
       const rowId = String(rowIds[rowIndex]);
       filteredRowIds.push(rowId);

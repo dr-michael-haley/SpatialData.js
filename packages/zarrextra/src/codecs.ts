@@ -111,9 +111,10 @@ const HTJ2K_LEGACY_CODEC_IDS = [
 ];
 const HTJ2K_CODEC_IDS = [HTJ2K_OPENJPH_CODEC_ID, ...HTJ2K_LEGACY_CODEC_IDS];
 
-const dynamicImport = new Function('specifier', 'return import(specifier)') as (
-  specifier: string
-) => Promise<Record<string, unknown>>;
+// Keep optional codecs out of the bundle without evaluating JavaScript strings;
+// importing zarrextra must also work under a Content Security Policy without unsafe-eval.
+const dynamicImport = (specifier: string): Promise<Record<string, unknown>> =>
+  import(/* @vite-ignore */ specifier);
 
 /**
  * Resolve a named export from a dynamically imported (untyped) module, falling
